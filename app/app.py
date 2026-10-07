@@ -1,24 +1,274 @@
 """
-Multi-Disease Prediction System - Streamlit App
-Run with: streamlit run app.py
-Expects trained models/scalers in ../models/ (produced by the train_*.py scripts)
+Multi-Disease Prediction System - Streamlit dashboard
+Run from the project root:  python -m streamlit run app/app.py
+
+Expects, relative to this file:
+  ../models/  trained model, scaler and metrics (.pkl) from the notebooks/train_*.py scripts
+  ../data/    the three CSV datasets (used for reference charts and sample patients)
 """
 
-import streamlit as st
+import os
 import pickle
+import warnings
+
 import numpy as np
 import pandas as pd
-import os
+import plotly.graph_objects as go
+import streamlit as st
+from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
+from sklearn.model_selection import train_test_split
+
+warnings.filterwarnings("ignore")
 
 st.set_page_config(
     page_title="Multi-Disease Prediction System",
-    page_icon="🩺",
-    layout="wide"
+    page_icon=":material/monitor_heart:",
+    layout="wide",
+    initial_sidebar_state="auto",
 )
 
-MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_DIR = os.path.join(BASE_DIR, "..", "models")
+DATA_DIR = os.path.join(BASE_DIR, "..", "data")
+
+# ---------------------------------------------------------------------------
+# Design tokens
+# ---------------------------------------------------------------------------
+INK = "#0E2230"
+INK_2 = "#506676"
+LINE = "#D9E1E4"
+CANVAS = "#F2F5F5"
+TEAL = "#0B7A75"
+RISK = "#B23A2E"
+CLEAR = "#2E7D5B"
+AMBER = "#B7791F"
+FONT = "'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif"
+
+CSS = f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+:root {{
+  --ink: {INK}; --ink-2: {INK_2}; --line: {LINE}; --canvas: {CANVAS};
+  --teal: {TEAL}; --risk: {RISK}; --clear: {CLEAR}; --amber: {AMBER};
+  --risk-soft: #F7E6E3; --clear-soft: #E3F1E9; --amber-soft: #F8EDD7; --teal-soft: #E1F0EE;
+}}
+
+html, body, [class*="st-"], [data-testid="stAppViewContainer"], button, input, select, textarea {{
+  font-family: {FONT};
+}}
+[data-testid="stIconMaterial"], [data-testid="stIconMaterial"] * {{ font-family: "Material Symbols Rounded" !important; }}
+[data-testid="stAppViewContainer"] {{ background: var(--canvas); color: var(--ink); }}
+[data-testid="stHeader"] {{ background: transparent; }}
+#MainMenu, footer {{ visibility: hidden; }}
+[data-testid="stMainBlockContainer"] {{ padding-top: 2.2rem; padding-bottom: 4rem; max-width: 1240px; }}
+
+/* ---- sidebar ---- */
+[data-testid="stSidebar"] {{ background: var(--ink); border-right: none; }}
+[data-testid="stSidebar"] * {{ color: #C9D6DD; }}
+[data-testid="stSidebarNav"]::before {{
+  content: "Multi-Disease Prediction";
+  display: block; text-align: left; padding: 1.2rem 1.1rem 0.2rem; font-size: 1.05rem; font-weight: 600; color: #FFFFFF;
+}}
+[data-testid="stSidebarNav"]::after {{
+  content: "SVM health screening dashboard";
+  display: block; text-align: left; padding: 0 1.1rem 1.1rem; font-size: 0.78rem; color: #8DA3AF;
+}}
+[data-testid="stSidebarNav"] a {{ border-radius: 6px; margin: 1px 0.5rem; }}
+[data-testid="stSidebarNav"] a:hover {{ background: rgba(255,255,255,0.07); }}
+[data-testid="stSidebarNav"] a[aria-current="page"] {{ background: rgba(255,255,255,0.12); }}
+[data-testid="stSidebarNav"] a[aria-current="page"] * {{ color: #FFFFFF; font-weight: 600; }}
+.side-foot {{ font-size: 0.78rem; line-height: 1.5; color: #8DA3AF; padding: 0 0.6rem; }}
+.side-foot b {{ color: #E4ECF0; font-weight: 600; }}
+
+/* ---- page header ---- */
+.page-head {{ margin-bottom: 1.4rem; }}
+.page-head h1 {{ font-size: 1.85rem; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 0.25rem; padding: 0; color: var(--ink); }}
+.page-head p {{ margin: 0; color: var(--ink-2); font-size: 0.98rem; max-width: 70ch; line-height: 1.5; }}
+
+/* ---- generic blocks ---- */
+.panel {{ background: #FFFFFF; border: 1px solid var(--line); border-radius: 8px; padding: 1.25rem 1.4rem; }}
+.panel-title {{ font-size: 1rem; font-weight: 600; margin: 0 0 0.15rem; color: var(--ink); }}
+.panel-sub {{ font-size: 0.86rem; color: var(--ink-2); margin: 0 0 0.9rem; line-height: 1.45; }}
+.group-title {{ font-size: 0.92rem; font-weight: 600; margin: 1.1rem 0 0.2rem; color: var(--ink); }}
+.group-title:first-child {{ margin-top: 0.2rem; }}
+.muted {{ color: var(--ink-2); font-size: 0.86rem; line-height: 1.5; }}
+
+/* ---- KPI strip ---- */
+.kpis {{ display: grid; grid-template-columns: repeat(3, 1fr); background: #FFFFFF; border: 1px solid var(--line); border-radius: 8px; }}
+.kpi {{ padding: 1.25rem 1.5rem 1.35rem; border-right: 1px solid var(--line); }}
+.kpi:last-child {{ border-right: none; }}
+.kpi .name {{ font-size: 0.95rem; font-weight: 600; color: var(--ink); }}
+.kpi .acc {{ font-size: 2.6rem; font-weight: 500; letter-spacing: -0.02em; line-height: 1.15; margin: 0.35rem 0 0.1rem; font-variant-numeric: tabular-nums; }}
+.kpi .acc small {{ font-size: 1.2rem; color: var(--ink-2); font-weight: 400; margin-left: 2px; }}
+.kpi .cap {{ font-size: 0.82rem; color: var(--ink-2); margin-bottom: 0.8rem; }}
+.kpi dl {{ margin: 0; display: grid; grid-template-columns: auto auto; gap: 0.18rem 1rem; font-size: 0.84rem; }}
+.kpi dt {{ color: var(--ink-2); }}
+.kpi dd {{ margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 500; }}
+.bar-dot {{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:8px; }}
+
+/* ---- pipeline ---- */
+.steps {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; background: #FFFFFF; border: 1px solid var(--line); border-radius: 8px; }}
+.step {{ padding: 1rem 1.15rem 1.1rem; border-right: 1px solid var(--line); }}
+.step:last-child {{ border-right: none; }}
+.step .n {{ font-size: 0.8rem; color: var(--teal); font-weight: 600; }}
+.step .t {{ font-size: 0.95rem; font-weight: 600; margin: 0.1rem 0 0.25rem; }}
+.step .d {{ font-size: 0.82rem; color: var(--ink-2); line-height: 1.45; }}
+
+/* ---- result panel ---- */
+.result {{ background: #FFFFFF; border: 1px solid var(--line); border-radius: 8px; padding: 1.4rem 1.5rem 1.5rem; }}
+.verdict {{ display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }}
+.verdict .v {{ font-size: 1.3rem; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; }}
+.verdict .p {{ font-size: 2.7rem; font-weight: 500; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1; white-space: nowrap; }}
+.verdict .p small {{ font-size: 1.1rem; font-weight: 400; color: var(--ink-2); }}
+.is-risk .v, .is-risk .p {{ color: var(--risk); }}
+.is-clear .v, .is-clear .p {{ color: var(--clear); }}
+.is-unsure .v, .is-unsure .p {{ color: var(--amber); }}
+.result .sub {{ color: var(--ink-2); font-size: 0.88rem; margin: 0.45rem 0 1.4rem; line-height: 1.5; }}
+
+.ruler {{ position: relative; margin: 3.1rem 0 1.5rem; }}
+.zones {{ display: flex; height: 12px; border-radius: 6px; overflow: hidden; }}
+.zones span {{ display: block; height: 100%; }}
+.z-clear {{ background: #BFDCCB; width: 40%; }}
+.z-unsure {{ background: #EBD6A6; width: 20%; }}
+.z-risk {{ background: #E3B5AE; width: 40%; }}
+.marker {{ position: absolute; top: -9px; width: 4px; height: 30px; background: var(--ink); border-radius: 2px; transform: translateX(-50%); }}
+.marker::before {{ content: attr(data-label); position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%);
+  background: var(--ink); color: #FFFFFF; font-size: 0.78rem; font-weight: 600; padding: 2px 7px; border-radius: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }}
+.ticks {{ display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--ink-2); margin-top: 0.5rem; font-variant-numeric: tabular-nums; }}
+.legend-row {{ display: flex; gap: 1.1rem; flex-wrap: wrap; font-size: 0.8rem; color: var(--ink-2); }}
+.legend-row i {{ display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }}
+
+.notice {{ border-left: 3px solid var(--amber); background: var(--amber-soft); padding: 0.7rem 1rem; border-radius: 0 6px 6px 0; font-size: 0.86rem; line-height: 1.5; color: var(--ink); }}
+
+/* ---- metric rows ---- */
+.mrow {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border: 1px solid var(--line); border-radius: 8px; background: #FFFFFF; }}
+.m {{ padding: 0.95rem 1.2rem; border-right: 1px solid var(--line); }}
+.m:last-child {{ border-right: none; }}
+.m .l {{ font-size: 0.82rem; color: var(--ink-2); }}
+.m .x {{ font-size: 1.7rem; font-weight: 500; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }}
+
+/* ---- native widgets ---- */
+[data-testid="stWidgetLabel"] p {{ font-size: 0.82rem; color: var(--ink-2); }}
+[data-testid="stNumberInput"] input, [data-baseweb="select"] > div {{ background: #FFFFFF; border-radius: 6px; }}
+div[data-testid="stButton"] button {{ border-radius: 6px; border: 1px solid var(--line); background: #FFFFFF; color: var(--ink); font-weight: 500; font-size: 0.86rem; }}
+div[data-testid="stButton"] button {{ min-height: 2.6rem; height: auto; padding: 0.3rem 0.7rem; }}
+div[data-testid="stButton"] button p {{ white-space: normal; line-height: 1.25; text-align: center; }}
+div[data-testid="stButton"] button:hover {{ border-color: var(--teal); color: var(--teal); }}
+[data-testid="stExpander"] {{ background: #FFFFFF; border: 1px solid var(--line); border-radius: 8px; }}
+[data-testid="stExpander"] summary p {{ font-weight: 600; font-size: 0.92rem; }}
+[data-testid="stDataFrame"] {{ border: 1px solid var(--line); border-radius: 8px; }}
+button:focus-visible, input:focus-visible {{ outline: 2px solid var(--teal); outline-offset: 2px; }}
+
+@media (max-width: 900px) {{
+  .kpis, .steps, .mrow {{ grid-template-columns: 1fr; }}
+  .kpi, .step, .m {{ border-right: none; border-bottom: 1px solid var(--line); }}
+  .verdict {{ flex-direction: column; gap: 0.4rem; }}
+}}
+</style>
+"""
+st.markdown(CSS, unsafe_allow_html=True)
 
 
+def html(s: str) -> None:
+    """Render an HTML snippet (leading whitespace stripped so Markdown never treats it as code)."""
+    st.markdown("\n".join(line.strip() for line in s.splitlines()), unsafe_allow_html=True)
+
+
+def page_header(title: str, subtitle: str) -> None:
+    html(f'<div class="page-head"><h1>{title}</h1><p>{subtitle}</p></div>')
+
+
+# ---------------------------------------------------------------------------
+# Disease configuration
+# ---------------------------------------------------------------------------
+CONFIG = {
+    "diabetes": {
+        "title": "Diabetes", "noun": "diabetes", "file": "diabetes.csv", "target": "Outcome",
+        "pos": "With diabetes", "neg": "Without diabetes", "color": "#2F5D8A",
+        "dataset": "Pima Indians Diabetes Database", "icon": ":material/bloodtype:",
+        "prep": "Zeros in glucose, blood pressure, skin thickness, insulin and BMI are treated as missing and replaced with the median.",
+    },
+    "heart": {
+        "title": "Heart disease", "noun": "heart disease", "file": "heart.csv", "target": "target",
+        "pos": "With heart disease", "neg": "Without heart disease", "color": "#0B7A75",
+        "dataset": "Cleveland Heart Disease (UCI)", "icon": ":material/favorite:",
+        "prep": "Duplicate rows and rows with missing values are removed before training.",
+    },
+    "parkinsons": {
+        "title": "Parkinson's disease", "noun": "Parkinson's disease", "file": "parkinsons.csv", "target": "status",
+        "pos": "With Parkinson's", "neg": "Healthy", "color": "#7A5C99",
+        "dataset": "Oxford Parkinson's Disease Detection (UCI)", "icon": ":material/graphic_eq:",
+        "prep": "The recording identifier column is dropped; the 22 voice measurements are used as features.",
+    },
+}
+
+HEART_NOTE = (
+    '<div class="muted" style="margin:0.2rem 0 0.9rem"><b>Data note.</b> In this copy of the Cleveland dataset, records labelled 1 '
+    '("with heart disease") have higher average maximum heart rate, less ST depression and fewer blocked vessels than records labelled 0. '
+    'That pattern usually points the other way, so check what the label means in the original UCI source before reading the direction '
+    'of this result as clinical.</div>'
+)
+
+# Input specifications. kind: int | float | select
+DIABETES_SPECS = [
+    dict(name="Pregnancies", label="Pregnancies", group="History", kind="int", lo=0, hi=20, help="Number of times pregnant."),
+    dict(name="Age", label="Age", unit="years", group="History", kind="int", lo=18, hi=100),
+    dict(name="Glucose", label="Glucose", unit="mg/dL", group="Metabolic markers", kind="int", lo=40, hi=300,
+         help="Plasma glucose concentration after a 2-hour oral glucose tolerance test."),
+    dict(name="Insulin", label="Insulin", unit="µU/mL", group="Metabolic markers", kind="int", lo=10, hi=900,
+         help="2-hour serum insulin."),
+    dict(name="BMI", label="BMI", unit="kg/m²", group="Metabolic markers", kind="float", lo=10.0, hi=70.0, step=0.1,
+         help="Body mass index."),
+    dict(name="BloodPressure", label="Blood pressure", unit="mmHg", group="Vitals and family history", kind="int", lo=20, hi=140,
+         help="Diastolic blood pressure."),
+    dict(name="SkinThickness", label="Skin thickness", unit="mm", group="Vitals and family history", kind="int", lo=5, hi=100,
+         help="Triceps skin fold thickness."),
+    dict(name="DiabetesPedigreeFunction", label="Pedigree function", group="Vitals and family history", kind="float",
+         lo=0.05, hi=2.5, step=0.01, help="Score estimating hereditary diabetes risk from family history."),
+]
+DIABETES_ORDER = ["Pregnancies", "Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI", "DiabetesPedigreeFunction", "Age"]
+
+HEART_SPECS = [
+    dict(name="age", label="Age", unit="years", group="Patient", kind="int", lo=18, hi=100),
+    dict(name="sex", label="Sex", group="Patient", kind="select", options={0: "Female", 1: "Male"}),
+    dict(name="cp", label="Chest pain type", group="Symptoms and exercise test", kind="select",
+         options={0: "Code 0", 1: "Code 1", 2: "Code 2", 3: "Code 3"}, help="Chest pain type, coded 0 to 3 as in the dataset."),
+    dict(name="exang", label="Exercise-induced angina", group="Symptoms and exercise test", kind="select", options={0: "No", 1: "Yes"}),
+    dict(name="thalach", label="Maximum heart rate", unit="bpm", group="Symptoms and exercise test", kind="int", lo=60, hi=220),
+    dict(name="oldpeak", label="ST depression", group="Symptoms and exercise test", kind="float", lo=0.0, hi=7.0, step=0.1,
+         help="ST depression induced by exercise relative to rest."),
+    dict(name="slope", label="ST segment slope", group="Symptoms and exercise test", kind="select",
+         options={0: "Code 0", 1: "Code 1", 2: "Code 2"}, help="Slope of the peak exercise ST segment, coded 0 to 2."),
+    dict(name="trestbps", label="Resting blood pressure", unit="mmHg", group="Clinical tests", kind="int", lo=80, hi=220),
+    dict(name="chol", label="Cholesterol", unit="mg/dL", group="Clinical tests", kind="int", lo=100, hi=600),
+    dict(name="fbs", label="Fasting blood sugar above 120 mg/dL", group="Clinical tests", kind="select", options={0: "No", 1: "Yes"}),
+    dict(name="restecg", label="Resting ECG result", group="Clinical tests", kind="select",
+         options={0: "Code 0", 1: "Code 1", 2: "Code 2"}, help="Resting electrocardiogram result, coded 0 to 2."),
+    dict(name="ca", label="Major vessels coloured", group="Clinical tests", kind="select",
+         options={0: "0", 1: "1", 2: "2", 3: "3", 4: "4"}, help="Number of major vessels coloured by fluoroscopy."),
+    dict(name="thal", label="Thalassemia result", group="Clinical tests", kind="select",
+         options={0: "Code 0", 1: "Code 1", 2: "Code 2", 3: "Code 3"}, help="Thalassemia test result, coded 0 to 3 as in the dataset."),
+]
+
+PARKINSONS_GROUPS = {
+    "Fundamental frequency": ["MDVP:Fo(Hz)", "MDVP:Fhi(Hz)", "MDVP:Flo(Hz)"],
+    "Frequency variation (jitter)": ["MDVP:Jitter(%)", "MDVP:Jitter(Abs)", "MDVP:RAP", "MDVP:PPQ", "Jitter:DDP"],
+    "Amplitude variation (shimmer)": ["MDVP:Shimmer", "MDVP:Shimmer(dB)", "Shimmer:APQ3", "Shimmer:APQ5", "MDVP:APQ", "Shimmer:DDA"],
+    "Noise ratios": ["NHR", "HNR"],
+    "Nonlinear voice measures": ["RPDE", "DFA", "spread1", "spread2", "D2", "PPE"],
+}
+PARKINSONS_HELP = {
+    "MDVP:Fo(Hz)": "Average vocal fundamental frequency.", "MDVP:Fhi(Hz)": "Maximum vocal fundamental frequency.",
+    "MDVP:Flo(Hz)": "Minimum vocal fundamental frequency.", "NHR": "Noise-to-harmonics ratio.",
+    "HNR": "Harmonics-to-noise ratio. Lower values mean a noisier voice.",
+}
+
+
+# ---------------------------------------------------------------------------
+# Data and model loading
+# ---------------------------------------------------------------------------
+@st.cache_resource(show_spinner=False)
 def load_pickle(name):
     path = os.path.join(MODEL_DIR, name)
     if not os.path.exists(path):
@@ -27,217 +277,546 @@ def load_pickle(name):
         return pickle.load(f)
 
 
-# ---------- Sidebar Navigation ----------
-st.sidebar.title("🧬 Multi-Disease Prediction System")
-page = st.sidebar.radio(
-    "Navigate",
-    ["🏠 Home", "🩺 Diabetes Prediction", "❤️ Heart Disease Prediction",
-     "🧠 Parkinson's Prediction", "📊 Dataset Information",
-     "📈 Model Performance", "ℹ️ About"]
-)
-st.sidebar.markdown("---")
-st.sidebar.caption("Built by Lahari Reddi")
-st.sidebar.caption("B.Tech CSE | Andhra University")
-# =========================================================
-# HOME
-# =========================================================
-if page == "🏠 Home":
-    st.title("🩺 Multi-Disease Prediction System")
-    st.markdown("##### *SVM-Based Health Diagnostics System*")
-    st.markdown("---")
-    st.markdown("""
-    Welcome! This application uses **Support Vector Machine (SVM)** models
-    to predict the likelihood of three conditions:
-
-    - 🩺 **Diabetes**
-    - ❤️ **Heart Disease**
-    - 🧠 **Parkinson's Disease**
-
-    Use the sidebar to navigate between prediction pages, explore the
-    datasets used, and review model performance metrics.
-    """)
-    st.info("👈 Select a disease from the sidebar to get started.")
-    st.warning("""
-    ⚠️ **Disclaimer:** This tool is built for educational and academic
-    purposes as part of an AI/ML internship project. It is **not** a
-    substitute for professional medical diagnosis or advice. Please
-    consult a qualified healthcare provider for any medical concerns.
-    """)
-# =========================================================
-# DIABETES PREDICTION
-# =========================================================
-elif page == "🩺 Diabetes Prediction":
-    st.title("🩺 Diabetes Prediction")
-    model = load_pickle("diabetes_model.pkl")
-    scaler = load_pickle("diabetes_scaler.pkl")
-
-    if model is None:
-        st.warning("Model not found. Run `train_diabetes.py` first to generate it.")
+@st.cache_data(show_spinner=False)
+def load_data(key):
+    """Dataset prepared exactly as in the matching train_*.py script."""
+    path = os.path.join(DATA_DIR, CONFIG[key]["file"])
+    if not os.path.exists(path):
+        return None
+    df = pd.read_csv(path, encoding="utf-8-sig")
+    if key == "diabetes":
+        for col in ["Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI"]:
+            df[col] = df[col].replace(0, np.nan)
+            df[col] = df[col].fillna(df[col].median())
+    elif key == "heart":
+        df = df.drop_duplicates().dropna()
     else:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            pregnancies = st.number_input("Pregnancies", 0, 20, 1)
-            glucose = st.number_input("Glucose", 0, 300, 120)
-            bp = st.number_input("Blood Pressure", 0, 200, 70)
-        with col2:
-            skin = st.number_input("Skin Thickness", 0, 100, 20)
-            insulin = st.number_input("Insulin", 0, 900, 80)
-            bmi = st.number_input("BMI", 0.0, 70.0, 25.0)
-        with col3:
-            dpf = st.number_input("Diabetes Pedigree Function", 0.0, 3.0, 0.5)
-            age = st.number_input("Age", 1, 120, 30)
+        if "name" in df.columns:
+            df = df.drop("name", axis=1)
+        df = df.dropna()
+    return df
 
-        if st.button("Predict Diabetes"):
-            features = np.array([[pregnancies, glucose, bp, skin, insulin, bmi, dpf, age]])
-            features_scaled = scaler.transform(features)
-            prediction = model.predict(features_scaled)[0]
-            proba = model.predict_proba(features_scaled)[0][1]
 
-            if prediction == 1:
-                st.error(f"⚠️ High likelihood of Diabetes ({proba*100:.1f}% confidence)")
-            else:
-                st.success(f"✅ Low likelihood of Diabetes ({(1-proba)*100:.1f}% confidence)")
+def bundle(key):
+    model = load_pickle(f"{key}_model.pkl")
+    scaler = load_pickle(f"{key}_scaler.pkl")
+    metrics = load_pickle(f"{key}_metrics.pkl")
+    if model is None or scaler is None:
+        return None
+    return dict(model=model, scaler=scaler, metrics=metrics or {})
 
-# =========================================================
-# HEART DISEASE PREDICTION
-# =========================================================
-elif page == "❤️ Heart Disease Prediction":
-    st.title("❤️ Heart Disease Prediction")
-    model = load_pickle("heart_model.pkl")
-    scaler = load_pickle("heart_scaler.pkl")
-    metrics = load_pickle("heart_metrics.pkl")
 
-    if model is None:
-        st.warning("Model not found. Run `train_heart.py` first to generate it.")
+def feature_order(key, b, df):
+    if key == "diabetes":
+        return DIABETES_ORDER
+    fo = b["metrics"].get("feature_order")
+    if fo:
+        return list(fo)
+    if df is not None:
+        return [c for c in df.columns if c != CONFIG[key]["target"]]
+    return []
+
+
+@st.cache_data(show_spinner=False)
+def evaluate(key):
+    """Recompute test-set metrics with the same split as the training scripts (80/20, seed 42, stratified)."""
+    b = bundle(key)
+    df = load_data(key)
+    if b is None or df is None:
+        return None
+    target = CONFIG[key]["target"]
+    order = feature_order(key, b, df)
+    X, y = df[order], df[target]
+    _, X_te, _, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    pred = b["model"].predict(b["scaler"].transform(X_te))
+    acc = float((pred == y_te.values).mean())
+    stored = b["metrics"].get("accuracy")
+    if stored is not None and abs(acc - stored) > 1e-6:
+        return dict(acc=float(stored), detail=False, n_test=int(len(y_te)))
+    p, r, f, _ = precision_recall_fscore_support(y_te, pred, average="binary", zero_division=0)
+    return dict(acc=acc, precision=float(p), recall=float(r), f1=float(f), cm=confusion_matrix(y_te, pred).tolist(),
+                n_test=int(len(y_te)), detail=True)
+
+
+@st.cache_data(show_spinner=False)
+def reference_stats(key):
+    """Per-class means/medians and ranges, used for sample patients and comparison charts."""
+    df = load_data(key)
+    if df is None:
+        return None
+    target = CONFIG[key]["target"]
+    feats = [c for c in df.columns if c != target]
+    g0, g1 = df[df[target] == 0][feats], df[df[target] == 1][feats]
+    pooled = np.sqrt((g0.var() + g1.var()) / 2).replace(0, np.nan)
+    effect = ((g1.mean() - g0.mean()).abs() / pooled).fillna(0)
+    return dict(mean0=g0.mean(), mean1=g1.mean(), med0=g0.median(), med1=g1.median(),
+                mode0=g0.mode().iloc[0], mode1=g1.mode().iloc[0],
+                lo=df[feats].min(), hi=df[feats].max(), effect=effect, n=len(df), n0=len(g0), n1=len(g1))
+
+
+def plot_style(fig, height=320):
+    fig.update_layout(
+        height=height, margin=dict(l=4, r=4, t=6, b=4), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family=FONT, size=12.5, color=INK), hoverlabel=dict(font_family=FONT, bgcolor="#FFFFFF"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, font=dict(size=12)),
+    )
+    fig.update_xaxes(gridcolor=LINE, zeroline=False, linecolor=LINE, tickfont=dict(color=INK_2))
+    fig.update_yaxes(gridcolor=LINE, zeroline=False, linecolor=LINE, tickfont=dict(color=INK_2))
+    return fig
+
+
+def show(fig):
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+
+
+def missing_notice(key):
+    st.error(f"The {CONFIG[key]['title'].lower()} model files were not found in the models folder. "
+             f"Run notebooks/train_{key}.py from inside the notebooks folder to create them.")
+
+
+# ---------------------------------------------------------------------------
+# Prediction page (shared by the three diseases)
+# ---------------------------------------------------------------------------
+def build_specs(key, df, stats):
+    if key == "diabetes":
+        return DIABETES_SPECS
+    if key == "heart":
+        return HEART_SPECS
+    specs = []
+    for group, names in PARKINSONS_GROUPS.items():
+        for n in names:
+            if stats is None or n not in stats["lo"].index:
+                continue
+            lo, hi = float(stats["lo"][n]), float(stats["hi"][n])
+            rng = max(hi - lo, 1e-9)
+            wlo = lo - 0.25 * rng
+            if lo >= 0:
+                wlo = max(wlo, 0.0)
+            specs.append(dict(name=n, label=n, group=group, kind="float", lo=wlo, hi=hi + 0.25 * rng,
+                              step=max(rng / 200, 1e-6), fmt="%.6f", help=PARKINSONS_HELP.get(n)))
+    return specs
+
+
+def coerce(spec, value):
+    """Convert a dataset value into something the matching widget accepts."""
+    if spec["kind"] == "select":
+        opts = list(spec["options"].keys())
+        v = int(round(float(value)))
+        return v if v in opts else min(opts, key=lambda o: abs(o - v))
+    if spec["kind"] == "int":
+        return int(min(max(round(float(value)), spec["lo"]), spec["hi"]))
+    return float(min(max(float(value), spec["lo"]), spec["hi"]))
+
+
+@st.cache_data(show_spinner=False)
+def representative_records(key):
+    """One real record per class: correctly classified by the model and closest to the class median."""
+    b, df = bundle(key), load_data(key)
+    if b is None or df is None:
+        return None
+    target = CONFIG[key]["target"]
+    order = feature_order(key, b, df)
+    X, y = df[order], df[target]
+    proba = b["model"].predict_proba(b["scaler"].transform(X))[:, 1]
+    sd = X.std().replace(0, 1)
+    out = {}
+    for cls in (0, 1):
+        ok = (y == cls).values & ((proba >= 0.5) == (cls == 1))
+        pool = X[ok]
+        if pool.empty:
+            pool = X[(y == cls).values]
+        dist = (((pool - X[y == cls].median()) / sd) ** 2).sum(axis=1)
+        out[cls] = pool.loc[dist.idxmin()].to_dict()
+    return out
+
+
+def sample_values(specs, record):
+    out = {}
+    for s in specs:
+        n = s["name"]
+        out[n] = coerce(s, record[n] if record and n in record else s.get("lo", 0))
+    return out
+
+
+def apply_preset(key, values):
+    for name, v in values.items():
+        st.session_state[f"{key}:{name}"] = v
+
+
+def render_input(key, spec):
+    k = f"{key}:{spec['name']}"
+    label = f"{spec['label']} ({spec['unit']})" if spec.get("unit") else spec["label"]
+    if spec["kind"] == "select":
+        opts = list(spec["options"].keys())
+        return st.selectbox(label, opts, key=k, format_func=lambda o: spec["options"][o], help=spec.get("help"))
+    if spec["kind"] == "int":
+        return st.number_input(label, min_value=int(spec["lo"]), max_value=int(spec["hi"]), step=1, key=k, help=spec.get("help"))
+    return st.number_input(label, min_value=float(spec["lo"]), max_value=float(spec["hi"]), step=float(spec["step"]),
+                           format=spec.get("fmt", "%.2f"), key=k, help=spec.get("help"))
+
+
+def result_panel(key, b, order, values, ev):
+    cfg = CONFIG[key]
+    row = pd.DataFrame([[values[n] for n in order]], columns=order)
+    scaled = b["scaler"].transform(row)
+    pred = int(b["model"].predict(scaled)[0])
+    p = float(b["model"].predict_proba(scaled)[0][1])
+    pct = p * 100
+
+    if 0.4 <= p <= 0.6:
+        state, head = "unsure", f"Close to the decision boundary for {cfg['noun']}"
+    elif pred == 1:
+        state, head = "risk", f"Higher likelihood of {cfg['noun']}"
     else:
-        st.caption("Enter values matching your dataset's feature order.")
-        feature_order = metrics["feature_order"] if metrics else [
-            "age", "sex", "cp", "trestbps", "chol", "fbs", "restecg",
-            "thalach", "exang", "oldpeak", "slope", "ca", "thal"
-        ]
-        inputs = []
-        cols = st.columns(3)
-        for i, feat in enumerate(feature_order):
-            with cols[i % 3]:
-                val = st.number_input(feat, value=0.0, key=f"heart_{feat}")
-                inputs.append(val)
+        state, head = "clear", f"Lower likelihood of {cfg['noun']}"
 
-        if st.button("Predict Heart Disease"):
-            features = np.array([inputs])
-            features_scaled = scaler.transform(features)
-            prediction = model.predict(features_scaled)[0]
-            proba = model.predict_proba(features_scaled)[0][1]
+    acc_txt = f"{ev['acc'] * 100:.1f}%" if ev else "n/a"
+    html(f"""
+    <div class="result is-{state}">
+      <div class="verdict"><div class="v">{head}</div><div class="p">{pct:.0f}<small>%</small></div></div>
+      <div class="sub">Estimated probability of {cfg['noun']} from the SVM model. On held-out records this model was correct {acc_txt} of the time.</div>
+      <div class="ruler">
+        <div class="zones"><span class="z-clear"></span><span class="z-unsure"></span><span class="z-risk"></span></div>
+        <div class="marker" style="left:{min(max(pct, 1), 99):.1f}%" data-label="{pct:.0f}%"></div>
+        <div class="ticks"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div>
+      </div>
+      <div class="legend-row">
+        <span><i style="background:#BFDCCB"></i>Lower (below 40%)</span>
+        <span><i style="background:#EBD6A6"></i>Uncertain (40 to 60%)</span>
+        <span><i style="background:#E3B5AE"></i>Higher (above 60%)</span>
+      </div>
+    </div>
+    """)
 
-            if prediction == 1:
-                st.error(f"⚠️ High likelihood of Heart Disease ({proba*100:.1f}% confidence)")
+
+def comparison_chart(key, order, values, stats, labels):
+    """Where this patient sits between typical records without and with the condition."""
+    cfg = CONFIG[key]
+    if stats is None:
+        return
+    top = stats["effect"].reindex(order).sort_values(ascending=False).head(6).index.tolist()
+    top = top[::-1]  # most distinctive feature at the top of the chart
+    ylab = {f: labels.get(f, f) for f in top}
+    lo, hi = stats["lo"], stats["hi"]
+
+    def norm(feat, v):
+        rng = max(float(hi[feat] - lo[feat]), 1e-12)
+        return float(min(max((v - lo[feat]) / rng, 0), 1))
+
+    fig = go.Figure()
+    for feat in top:
+        fig.add_trace(go.Scatter(x=[norm(feat, stats["mean0"][feat]), norm(feat, stats["mean1"][feat])], y=[ylab[feat]] * 2,
+                                 mode="lines", line=dict(color=LINE, width=4), hoverinfo="skip", showlegend=False))
+
+    def series(name, xs, text, **marker):
+        fig.add_trace(go.Scatter(x=xs, y=[ylab[f] for f in top], mode="markers", name=name, marker=marker, text=text,
+                                 hovertemplate="%{y}<br>%{text}<extra>" + name + "</extra>"))
+
+    series(cfg["neg"], [norm(f, stats["mean0"][f]) for f in top], [f"Typical value {stats['mean0'][f]:.4g}" for f in top],
+           size=12, color=CLEAR)
+    series(cfg["pos"], [norm(f, stats["mean1"][f]) for f in top], [f"Typical value {stats['mean1'][f]:.4g}" for f in top],
+           size=12, color=RISK)
+    series("This patient", [norm(f, values[f]) for f in top], [f"Entered value {values[f]:.4g}" for f in top],
+           size=15, color=INK, symbol="diamond", line=dict(color="#FFFFFF", width=2))
+    plot_style(fig, 300)
+    fig.update_xaxes(range=[-0.04, 1.04], tickvals=[0, 0.5, 1], ticktext=["Low", "Mid", "High"], title_text="Position within the dataset range", title_font=dict(color=INK_2))
+    fig.update_yaxes(gridcolor="rgba(0,0,0,0)")
+    show(fig)
+
+
+def predictor_page(key):
+    cfg = CONFIG[key]
+    page_header(f"{cfg['title']} risk prediction",
+                f"Enter patient measurements to see the model's estimate. Results update as you change a value. Dataset: {cfg['dataset']}.")
+    b = bundle(key)
+    if b is None:
+        missing_notice(key)
+        return
+    df = load_data(key)
+    stats = reference_stats(key)
+    ev = evaluate(key)
+    specs = build_specs(key, df, stats)
+    order = feature_order(key, b, df)
+    if not specs or not order:
+        st.error(f"The {cfg['title'].lower()} dataset was not found in the data folder, so the input form cannot be built.")
+        return
+
+    # initialise widget state once (typical record without the condition)
+    recs = representative_records(key)
+    base = sample_values(specs, recs[0] if recs else None)
+    for s in specs:
+        st.session_state.setdefault(f"{key}:{s['name']}", base[s["name"]])
+
+    left, right = st.columns([1.1, 1], gap="large")
+    with left:
+        html('<div class="muted" style="margin-bottom:0.4rem">Start from a real record from the dataset, then adjust any value.</div>')
+        c1, c2 = st.columns(2)
+        c1.button(f"{cfg['neg']} sample", key=f"{key}-neg", width="stretch",
+                  on_click=apply_preset, args=(key, base))
+        c2.button(f"{cfg['pos']} sample", key=f"{key}-pos", width="stretch",
+                  on_click=apply_preset, args=(key, sample_values(specs, recs[1] if recs else None)))
+        st.write("")
+
+        groups = {}
+        for s in specs:
+            groups.setdefault(s["group"], []).append(s)
+
+        values = {}
+        if key == "parkinsons":
+            for i, (g, items) in enumerate(groups.items()):
+                with st.expander(g, expanded=(i == 0)):
+                    cols = st.columns(2)
+                    for j, s in enumerate(items):
+                        with cols[j % 2]:
+                            values[s["name"]] = render_input(key, s)
+        else:
+            for g, items in groups.items():
+                html(f'<div class="group-title">{g}</div>')
+                cols = st.columns(2)
+                for j, s in enumerate(items):
+                    with cols[j % 2]:
+                        values[s["name"]] = render_input(key, s)
+
+    with right:
+        result_panel(key, b, order, values, ev)
+        st.write("")
+        html('<div class="panel-title">How this patient compares</div>'
+             '<div class="panel-sub">The six measurements that best separate the two groups in the training data. '
+             'Dots show the typical value for each group, scaled to the dataset range.</div>')
+        comparison_chart(key, order, values, stats, {sp['name']: sp['label'] for sp in specs})
+        if key == "heart":
+            html(HEART_NOTE)
+        html('<div class="notice">Educational tool built for an AI/ML internship project. It is not a medical device '
+             'and must not be used for diagnosis. Speak to a qualified clinician about any health concern.</div>')
+
+
+# ---------------------------------------------------------------------------
+# Overview
+# ---------------------------------------------------------------------------
+def overview_page():
+    page_header("Multi-disease risk screening",
+                "Three Support Vector Machine models estimate the likelihood of diabetes, heart disease and Parkinson's disease "
+                "from clinical and voice measurements.")
+    cards, evs = [], {}
+    for key, cfg in CONFIG.items():
+        ev, st_ = evaluate(key), reference_stats(key)
+        evs[key] = ev
+        feats = len(st_["lo"]) if st_ else "n/a"
+        acc = f"{ev['acc'] * 100:.1f}<small>%</small>" if ev else "n/a"
+        recs = f"{st_['n']:,}" if st_ else "n/a"
+        ntest = ev["n_test"] if ev else "n/a"
+        cards.append(f"""
+        <div class="kpi">
+          <div class="name"><span class="bar-dot" style="background:{cfg['color']}"></span>{cfg['title']}</div>
+          <div class="acc">{acc}</div>
+          <div class="cap">Accuracy on held-out records</div>
+          <dl><dt>Records</dt><dd>{recs}</dd><dt>Input features</dt><dd>{feats}</dd><dt>Test records</dt><dd>{ntest}</dd></dl>
+        </div>""")
+    html(f'<div class="kpis">{"".join(cards)}</div>')
+    st.write("")
+
+    c1, c2 = st.columns([1.35, 1], gap="large")
+    with c1:
+        html('<div class="panel-title">Test performance by model</div>'
+             '<div class="panel-sub">Accuracy alone can hide mistakes. Recall is the share of real cases the model catches, '
+             'precision is the share of flagged cases that are real.</div>')
+        metrics = [("Accuracy", "acc"), ("Precision", "precision"), ("Recall", "recall"), ("F1 score", "f1")]
+        fig = go.Figure()
+        for key, cfg in CONFIG.items():
+            ev = evs[key]
+            if ev and ev.get("detail"):
+                fig.add_trace(go.Bar(name=cfg["title"], x=[m[0] for m in metrics], y=[ev[m[1]] * 100 for m in metrics],
+                                     marker_color=cfg["color"], hovertemplate="%{x}: %{y:.1f}%<extra>" + cfg["title"] + "</extra>"))
+        plot_style(fig, 330)
+        fig.update_layout(barmode="group", bargap=0.28, bargroupgap=0.06)
+        fig.update_yaxes(range=[0, 100], ticksuffix="%")
+        fig.update_xaxes(gridcolor="rgba(0,0,0,0)")
+        show(fig)
+    with c2:
+        html('<div class="panel-title">Class balance in each dataset</div>'
+             '<div class="panel-sub">Parkinson\'s records are mostly positive, which is why the models use balanced class weights.</div>')
+        fig = go.Figure()
+        names, neg, pos = [], [], []
+        for key, cfg in CONFIG.items():
+            s = reference_stats(key)
+            if s:
+                names.append(cfg["title"]); neg.append(s["n0"]); pos.append(s["n1"])
+        fig.add_trace(go.Bar(y=names, x=neg, name="Without condition", orientation="h", marker_color=CLEAR))
+        fig.add_trace(go.Bar(y=names, x=pos, name="With condition", orientation="h", marker_color=RISK))
+        plot_style(fig, 330)
+        fig.update_layout(barmode="stack", bargap=0.45)
+        fig.update_yaxes(autorange="reversed", gridcolor="rgba(0,0,0,0)")
+        show(fig)
+
+    html('<div class="panel-title" style="margin-top:0.6rem">How each model is built</div>'
+         '<div class="panel-sub">The same five steps are applied to every dataset.</div>')
+    html("""
+    <div class="steps">
+      <div class="step"><div class="n">1</div><div class="t">Clean</div><div class="d">Fix invalid zeros, drop duplicates and identifier columns.</div></div>
+      <div class="step"><div class="n">2</div><div class="t">Split</div><div class="d">80% training and 20% test, stratified so class ratios match.</div></div>
+      <div class="step"><div class="n">3</div><div class="t">Scale</div><div class="d">StandardScaler fitted on training data only to avoid leakage.</div></div>
+      <div class="step"><div class="n">4</div><div class="t">Tune</div><div class="d">GridSearchCV with 5-fold cross-validation over C, gamma and kernel.</div></div>
+      <div class="step"><div class="n">5</div><div class="t">Predict</div><div class="d">Probability estimate from the tuned SVM, served in this app.</div></div>
+    </div>
+    """)
+
+
+# ---------------------------------------------------------------------------
+# Model performance
+# ---------------------------------------------------------------------------
+def confusion_chart(cm, cfg):
+    labels = [cfg["neg"], cfg["pos"]]
+    z = np.array(cm)
+    fig = go.Figure(go.Heatmap(
+        z=z, x=[f"Predicted: {l.lower()}" for l in labels], y=[f"Actual: {l.lower()}" for l in labels],
+        colorscale=[[0, "#F4F8F8"], [1, TEAL]], showscale=False, hoverinfo="skip",
+        text=z.astype(str), texttemplate="%{text}", textfont=dict(size=22, family=FONT),
+    ))
+    plot_style(fig, 300)
+    fig.update_yaxes(autorange="reversed", gridcolor="rgba(0,0,0,0)")
+    fig.update_xaxes(gridcolor="rgba(0,0,0,0)", side="top")
+    return fig
+
+
+def performance_page():
+    page_header("Model performance",
+                "Every number on this page is recomputed from the saved models on the same 20% test split used during training.")
+    tabs = st.tabs([cfg["title"] for cfg in CONFIG.values()])
+    for tab, (key, cfg) in zip(tabs, CONFIG.items()):
+        with tab:
+            b, ev = bundle(key), evaluate(key)
+            if b is None or ev is None:
+                missing_notice(key)
+                continue
+            if ev.get("detail"):
+                html(f"""
+                <div class="mrow">
+                  <div class="m"><div class="l">Accuracy</div><div class="x">{ev['acc']*100:.1f}%</div></div>
+                  <div class="m"><div class="l">Precision</div><div class="x">{ev['precision']*100:.1f}%</div></div>
+                  <div class="m"><div class="l">Recall</div><div class="x">{ev['recall']*100:.1f}%</div></div>
+                  <div class="m"><div class="l">F1 score</div><div class="x">{ev['f1']*100:.1f}%</div></div>
+                </div>""")
             else:
-                st.success(f"✅ Low likelihood of Heart Disease ({(1-proba)*100:.1f}% confidence)")
+                html(f'<div class="mrow" style="grid-template-columns:1fr"><div class="m"><div class="l">Accuracy</div><div class="x">{ev["acc"]*100:.1f}%</div></div></div>')
+            st.write("")
+            c1, c2 = st.columns([1.1, 1], gap="large")
+            with c1:
+                if ev.get("detail"):
+                    html('<div class="panel-title">Confusion matrix</div>'
+                         f'<div class="panel-sub">{ev["n_test"]} test records. Rows are the true class, columns are the model\'s prediction.</div>')
+                    show(confusion_chart(ev["cm"], cfg))
+                else:
+                    st.info("Detailed metrics are not available because the test split could not be reproduced.")
+            with c2:
+                params = b["model"].get_params()
+                rows = [("Algorithm", "Support Vector Classifier"), ("Kernel", params.get("kernel")), ("C (regularisation)", params.get("C")),
+                        ("Gamma", params.get("gamma")), ("Class weight", params.get("class_weight") or "none"),
+                        ("Probability output", "Platt scaling" if params.get("probability") else "off"),
+                        ("Test records", ev["n_test"])]
+                body = "".join(f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in rows)
+                html(f"""
+                <div class="panel-title">Selected hyperparameters</div>
+                <div class="panel-sub">Chosen by GridSearchCV with cross-validation on the training data.</div>
+                <table style="width:100%;border-collapse:collapse;font-size:0.9rem;background:#fff;border:1px solid {LINE};border-radius:8px">
+                {body.replace('<td>', '<td style="padding:0.55rem 0.9rem;border-bottom:1px solid ' + LINE + '">')}
+                </table>""")
+                st.write("")
+                html(f'<div class="muted"><b>Reading this honestly.</b> With only {ev["n_test"]} test records, one extra mistake moves accuracy by '
+                     f'about {100/ev["n_test"]:.1f} percentage points, so treat these scores as estimates rather than exact figures.</div>')
 
-# =========================================================
-# PARKINSON'S PREDICTION
-# =========================================================
-elif page == "🧠 Parkinson's Prediction":
-    st.title("🧠 Parkinson's Disease Prediction")
-    model = load_pickle("parkinsons_model.pkl")
-    scaler = load_pickle("parkinsons_scaler.pkl")
-    metrics = load_pickle("parkinsons_metrics.pkl")
 
-    if model is None:
-        st.warning("Model not found. Run `train_parkinsons.py` first to generate it.")
-    else:
-        st.caption("Enter voice measurement values matching your dataset's feature order.")
-        feature_order = metrics["feature_order"] if metrics else []
-        inputs = []
-        cols = st.columns(3)
-        for i, feat in enumerate(feature_order):
-            with cols[i % 3]:
-                val = st.number_input(feat, value=0.0, key=f"pd_{feat}")
-                inputs.append(val)
+# ---------------------------------------------------------------------------
+# Data explorer
+# ---------------------------------------------------------------------------
+def data_page():
+    page_header("Data explorer", "Inspect the datasets the models were trained on and how each measurement differs between groups.")
+    key = st.segmented_control("Dataset", list(CONFIG.keys()), default="diabetes", format_func=lambda k: CONFIG[k]["title"],
+                               label_visibility="collapsed") or "diabetes"
+    cfg, df, s = CONFIG[key], load_data(key), reference_stats(key)
+    if df is None:
+        st.error("Dataset file not found in the data folder.")
+        return
+    target = cfg["target"]
+    html(f"""
+    <div class="mrow">
+      <div class="m"><div class="l">Records after cleaning</div><div class="x">{s['n']:,}</div></div>
+      <div class="m"><div class="l">Input features</div><div class="x">{len(s['lo'])}</div></div>
+      <div class="m"><div class="l">{cfg['pos']}</div><div class="x">{s['n1']:,}</div></div>
+      <div class="m"><div class="l">{cfg['neg']}</div><div class="x">{s['n0']:,}</div></div>
+    </div>""")
+    html(f'<div class="muted" style="margin:0.7rem 0 1rem"><b>{cfg["dataset"]}.</b> {cfg["prep"]}</div>')
+    if key == "heart":
+        html(HEART_NOTE)
 
-        if st.button("Predict Parkinson's"):
-            features = np.array([inputs])
-            features_scaled = scaler.transform(features)
-            prediction = model.predict(features_scaled)[0]
-            proba = model.predict_proba(features_scaled)[0][1]
+    feats = [c for c in df.columns if c != target]
+    feat = st.selectbox("Measurement to compare", feats, index=int(np.argmax(s["effect"].reindex(feats).values)))
+    fig = go.Figure()
+    for cls, name, color in [(0, cfg["neg"], CLEAR), (1, cfg["pos"], RISK)]:
+        fig.add_trace(go.Histogram(x=df[df[target] == cls][feat], name=name, marker_color=color, opacity=0.65, nbinsx=24))
+    plot_style(fig, 340)
+    fig.update_layout(barmode="overlay", bargap=0.04)
+    fig.update_xaxes(title_text=feat, title_font=dict(color=INK_2), gridcolor="rgba(0,0,0,0)")
+    fig.update_yaxes(title_text="Records", title_font=dict(color=INK_2))
+    show(fig)
+    st.caption("The measurement above is pre-selected as the one that separates the two groups most strongly.")
+    with st.expander("Preview the first 15 records"):
+        st.dataframe(df.head(15), width="stretch", hide_index=True)
 
-            if prediction == 1:
-                st.error(f"⚠️ High likelihood of Parkinson's ({proba*100:.1f}% confidence)")
-            else:
-                st.success(f"✅ Low likelihood of Parkinson's ({(1-proba)*100:.1f}% confidence)")
 
-# =========================================================
-# DATASET INFORMATION
-# =========================================================
-elif page == "📊 Dataset Information":
-    st.title("📊 Dataset Information")
+# ---------------------------------------------------------------------------
+# About
+# ---------------------------------------------------------------------------
+def about_page():
+    page_header("About this project",
+                "A multi-disease prediction system built as the capstone of the Robokwik Prabandhan AI/ML/DS internship (IIT Kanpur).")
+    c1, c2 = st.columns(2, gap="large")
+    with c1:
+        html("""
+        <div class="panel">
+          <div class="panel-title">What it does</div>
+          <div class="panel-sub">Predicts the likelihood of diabetes, heart disease and Parkinson's disease from clinical and voice
+          measurements, using one Support Vector Machine per disease with an RBF kernel (selected per model by grid search).</div>
+          <div class="panel-title">Technology</div>
+          <div class="panel-sub" style="margin-bottom:0">
+          Python for the whole pipeline. pandas and NumPy for data handling. scikit-learn for scaling, SVM, grid search and metrics.
+          Plotly for charts. Streamlit for the web interface. pickle to save and load trained models.</div>
+        </div>""")
+    with c2:
+        html("""
+        <div class="panel">
+          <div class="panel-title">Limitations</div>
+          <div class="panel-sub" style="margin-bottom:0.9rem">The datasets are small public benchmarks, and the test sets contain only a few dozen
+          records, so the scores are rough estimates. The models are not clinically validated and may not generalise to other populations.</div>
+          <div class="panel-title">Built by</div>
+          <div class="panel-sub" style="margin-bottom:0">Reddi Lahari, B.Tech Computer Science Engineering,
+          Andhra University College of Engineering for Women.</div>
+        </div>""")
+    st.write("")
+    html('<div class="notice"><b>Disclaimer.</b> This tool is for education and academic demonstration. It is not a substitute for '
+         'professional medical diagnosis or advice.</div>')
 
-    st.subheader("🩺 Diabetes Dataset (Pima Indians)")
-    st.markdown("""
-    - **Source:** UCI / Kaggle - Pima Indians Diabetes Database
-    - **Samples:** 768 | **Features:** 8
-    - **Target:** Outcome (1 = Diabetic, 0 = Non-diabetic)
-    - **Key features:** Glucose, BMI, Age, Insulin, Blood Pressure
-    """)
 
-    st.subheader("❤️ Heart Disease Dataset (UCI / Cleveland)")
-    st.markdown("""
-    - **Source:** UCI Machine Learning Repository
-    - **Samples:** ~303 | **Features:** 13
-    - **Target:** target (1 = Presence of disease, 0 = Absence)
-    - **Key features:** Chest pain type, resting BP, cholesterol, max heart rate
-    """)
+# ---------------------------------------------------------------------------
+# Navigation
+# ---------------------------------------------------------------------------
+def diabetes_page(): predictor_page("diabetes")
+def heart_page(): predictor_page("heart")
+def parkinsons_page(): predictor_page("parkinsons")
 
-    st.subheader("🧠 Parkinson's Dataset (UCI)")
-    st.markdown("""
-    - **Source:** UCI Machine Learning Repository
-    - **Samples:** 195 | **Features:** 22 voice measurements
-    - **Target:** status (1 = Parkinson's, 0 = Healthy)
-    - **Key features:** Jitter, Shimmer, HNR, and other vocal frequency measures
-    """)
 
-# =========================================================
-# MODEL PERFORMANCE
-# =========================================================
-elif page == "📈 Model Performance":
-    st.title("📈 Model Performance")
-    st.markdown("Accuracy achieved by each SVM model on held-out test data.")
-    st.markdown("---")
+pages = [
+    st.Page(overview_page, title="Overview", icon=":material/dashboard:", url_path="overview", default=True),
+    st.Page(diabetes_page, title="Diabetes", icon=":material/bloodtype:", url_path="diabetes"),
+    st.Page(heart_page, title="Heart disease", icon=":material/favorite:", url_path="heart"),
+    st.Page(parkinsons_page, title="Parkinson's disease", icon=":material/graphic_eq:", url_path="parkinsons"),
+    st.Page(performance_page, title="Model performance", icon=":material/monitoring:", url_path="performance"),
+    st.Page(data_page, title="Data explorer", icon=":material/database:", url_path="data"),
+    st.Page(about_page, title="About", icon=":material/info:", url_path="about"),
+]
+nav = st.navigation(pages)
 
-    col1, col2, col3 = st.columns(3)
-    diseases = [("🩺 Diabetes", "diabetes", col1), ("❤️ Heart Disease", "heart", col2),
-                ("🧠 Parkinson's", "parkinsons", col3)]
+with st.sidebar:
+    html('<div class="side-foot" style="margin-top:1.5rem"><b>Educational use only.</b><br>Not a medical device.<br><br>'
+         'Built by Lahari Reddi<br>B.Tech CSE, Andhra University</div>')
 
-    for label, key, col in diseases:
-        metrics = load_pickle(f"{key}_metrics.pkl")
-        with col:
-            st.subheader(label)
-            if metrics:
-                st.metric("Accuracy", f"{metrics['accuracy']*100:.2f}%")
-                with st.expander("Best Parameters"):
-                    st.json(metrics["best_params"])
-            else:
-                st.warning(f"Train the {key} model first.")
-
-    st.markdown("---")
-    st.markdown("""
-    **Note:** All models use an SVM classifier with an RBF kernel,
-    selected through hyperparameter tuning for optimal performance
-    on each disease's respective dataset.
-    """)
-# =========================================================
-# ABOUT
-# =========================================================
-elif page == "ℹ️ About":
-    st.title("ℹ️ About This Project")
-    st.markdown("""
-    **Multi-Disease Prediction System** is an SVM-based machine learning
-    application built as part of the Robokwik Prabandhan AI/ML/DS internship
-    program (IIT Kanpur).
-
-    It applies Support Vector Machines with kernel methods to predict
-    Diabetes, Heart Disease, and Parkinson's Disease from clinical and
-    voice-based measurements.
-
-    **Built by:** Lahari Reddi
-    **Tech stack:** Python, scikit-learn, Streamlit, pandas, seaborn
-    """)
+nav.run()
