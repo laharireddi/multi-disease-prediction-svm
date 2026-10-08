@@ -68,11 +68,8 @@ html, body, [class*="st-"], [data-testid="stAppViewContainer"], button, input, s
 [data-testid="stSidebar"] * {{ color: #C9D6DD; }}
 [data-testid="stSidebarNav"]::before {{
   content: "Multi-Disease Prediction";
-  display: block; text-align: left; padding: 1.2rem 1.1rem 0.2rem; font-size: 1.05rem; font-weight: 600; color: #FFFFFF;
-}}
-[data-testid="stSidebarNav"]::after {{
-  content: "SVM health screening dashboard";
-  display: block; text-align: left; padding: 0 1.1rem 1.1rem; font-size: 0.78rem; color: #8DA3AF;
+  display: block; text-align: left; padding: 1.35rem 1.1rem 0.1rem 4rem; font-size: 1.02rem; font-weight: 600; color: #FFFFFF;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='9' fill='%230B7A75'/%3E%3Cpolyline points='6,22 14,22 18,11 23,31 27,17 30,22 34,22' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat 1.1rem 1.15rem / 32px 32px; min-height: 1.6rem;
 }}
 [data-testid="stSidebarNav"] a {{ border-radius: 6px; margin: 1px 0.5rem; }}
 [data-testid="stSidebarNav"] a:hover {{ background: rgba(255,255,255,0.07); }}
@@ -82,7 +79,10 @@ html, body, [class*="st-"], [data-testid="stAppViewContainer"], button, input, s
 .side-foot b {{ color: #E4ECF0; font-weight: 600; }}
 
 /* ---- page header ---- */
-.page-head {{ margin-bottom: 1.4rem; }}
+.page-head {{ margin-bottom: 1.5rem; padding-bottom: 1.2rem; border-bottom: 1px solid var(--line); }}
+.chips {{ display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.9rem; }}
+.chip {{ background: #FFFFFF; border: 1px solid var(--line); border-radius: 999px; padding: 0.2rem 0.75rem; font-size: 0.8rem; color: var(--ink-2); }}
+.chip b {{ color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }}
 .page-head h1 {{ font-size: 1.85rem; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 0.25rem; padding: 0; color: var(--ink); }}
 .page-head p {{ margin: 0; color: var(--ink-2); font-size: 0.98rem; max-width: 70ch; line-height: 1.5; }}
 
@@ -160,6 +160,25 @@ div[data-testid="stButton"] button:hover {{ border-color: var(--teal); color: va
 [data-testid="stDataFrame"] {{ border: 1px solid var(--line); border-radius: 8px; }}
 button:focus-visible, input:focus-visible {{ outline: 2px solid var(--teal); outline-offset: 2px; }}
 
+/* ---- cards (containers created with key="card_...") ---- */
+[class*="st-key-card"] {{ background: #FFFFFF; border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(14, 34, 48, 0.05); padding: 1.1rem 1.3rem 1.2rem; }}
+[class*="st-key-card"] .group-title {{ margin-top: 0; }}
+[data-testid="stPageLink"] a {{ border: 1px solid var(--line); background: #FFFFFF; border-radius: 6px; padding: 0.5rem 0.9rem; }}
+[data-testid="stPageLink"] a:hover {{ border-color: var(--teal); }}
+[data-testid="stPageLink"] p {{ font-weight: 500; font-size: 0.88rem; }}
+.badge {{ display: inline-block; border-radius: 999px; padding: 0.16rem 0.75rem; font-size: 0.78rem; font-weight: 600; margin-bottom: 0.8rem; }}
+.is-risk .badge {{ background: var(--risk-soft); color: var(--risk); }}
+.is-clear .badge {{ background: var(--clear-soft); color: var(--clear); }}
+.is-unsure .badge {{ background: var(--amber-soft); color: var(--amber); }}
+.guide {{ margin-top: 1.3rem; padding-top: 0.95rem; border-top: 1px solid var(--line); font-size: 0.86rem; color: var(--ink-2); line-height: 1.55; }}
+.fx-label {{ font-size: 0.84rem; color: var(--ink-2); margin-top: 0.5rem; }}
+.fx {{ display: inline-block; border-radius: 6px; padding: 0.18rem 0.6rem; margin: 0.25rem 0.35rem 0.1rem 0; font-size: 0.84rem; font-weight: 500; }}
+.fx-up {{ background: var(--risk-soft); color: var(--risk); }}
+.fx-down {{ background: var(--clear-soft); color: var(--clear); }}
+.fx-none {{ color: var(--ink-2); font-size: 0.84rem; margin: 0.25rem 0; }}
+.footer {{ margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--line); font-size: 0.78rem; color: var(--ink-2); line-height: 1.6; }}
+
 @media (max-width: 900px) {{
   .kpis, .steps, .mrow {{ grid-template-columns: 1fr; }}
   .kpi, .step, .m {{ border-right: none; border-bottom: 1px solid var(--line); }}
@@ -175,8 +194,11 @@ def html(s: str) -> None:
     st.markdown("\n".join(line.strip() for line in s.splitlines()), unsafe_allow_html=True)
 
 
-def page_header(title: str, subtitle: str) -> None:
-    html(f'<div class="page-head"><h1>{title}</h1><p>{subtitle}</p></div>')
+def page_header(title: str, subtitle: str, chips=None) -> None:
+    chip_html = ""
+    if chips:
+        chip_html = '<div class="chips">' + "".join(f'<span class="chip">{c}</span>' for c in chips) + "</div>"
+    html(f'<div class="page-head"><h1>{title}</h1><p>{subtitle}</p>{chip_html}</div>')
 
 
 # ---------------------------------------------------------------------------
@@ -464,15 +486,19 @@ def result_panel(key, b, order, values, ev):
     pct = p * 100
 
     if 0.4 <= p <= 0.6:
-        state, head = "unsure", f"Close to the decision boundary for {cfg['noun']}"
+        state, head, badge = "unsure", f"Close to the decision boundary for {cfg['noun']}", "Uncertain"
+        guide = "The model cannot separate this case clearly. Treat it as inconclusive and rely on clinical tests."
     elif pred == 1:
-        state, head = "risk", f"Higher likelihood of {cfg['noun']}"
+        state, head, badge = "risk", f"Higher likelihood of {cfg['noun']}", "Elevated risk"
+        guide = "This is a screening estimate, not a diagnosis. A clinician would confirm it with laboratory or clinical tests."
     else:
-        state, head = "clear", f"Lower likelihood of {cfg['noun']}"
+        state, head, badge = "clear", f"Lower likelihood of {cfg['noun']}", "Lower risk"
+        guide = "A lower estimate does not rule the condition out. Regular check-ups still matter."
 
     acc_txt = f"{ev['acc'] * 100:.1f}%" if ev else "n/a"
     html(f"""
     <div class="result is-{state}">
+      <div class="badge">{badge}</div>
       <div class="verdict"><div class="v">{head}</div><div class="p">{pct:.0f}<small>%</small></div></div>
       <div class="sub">Estimated probability of {cfg['noun']} from the SVM model. On held-out records this model was correct {acc_txt} of the time.</div>
       <div class="ruler">
@@ -485,8 +511,38 @@ def result_panel(key, b, order, values, ev):
         <span><i style="background:#EBD6A6"></i>Uncertain (40 to 60%)</span>
         <span><i style="background:#E3B5AE"></i>Higher (above 60%)</span>
       </div>
+      <div class="guide">{guide}</div>
     </div>
     """)
+    return pct, head
+
+
+def key_factors(order, values, stats, labels):
+    """Which entered values sit closer to the typical record of each group (descriptive, not causal)."""
+    lo, hi = stats["lo"], stats["hi"]
+    rows = []
+    for f in order:
+        rng = max(float(hi[f] - lo[f]), 1e-12)
+        m0, m1 = (stats["mean0"][f] - lo[f]) / rng, (stats["mean1"][f] - lo[f]) / rng
+        gap = m1 - m0
+        eff = float(stats["effect"][f])
+        if abs(gap) < 1e-9 or eff < 0.3:
+            continue
+        v = (values[f] - lo[f]) / rng
+        score = (v - (m0 + m1) / 2) / (gap / 2)  # about -1 at the typical record without, +1 with the condition
+        rows.append((labels.get(f, f), score, eff))
+    toward = sorted([r for r in rows if r[1] > 0.4], key=lambda r: r[1] * r[2], reverse=True)[:3]
+    away = sorted([r for r in rows if r[1] < -0.4], key=lambda r: -r[1] * r[2], reverse=True)[:3]
+    return [r[0] for r in toward], [r[0] for r in away]
+
+
+def result_csv(key, order, values, pct, head, labels):
+    cfg = CONFIG[key]
+    rows = [("Report", f"{cfg['title']} screening estimate"), ("Result", head), ("Estimated probability (%)", f"{pct:.1f}"),
+            ("Model", "Support Vector Machine, RBF kernel")]
+    rows += [(labels.get(f, f), values[f]) for f in order]
+    rows.append(("Note", "Educational tool. Not a medical device and not a diagnosis."))
+    return pd.DataFrame(rows, columns=["Field", "Value"]).to_csv(index=False).encode("utf-8")
 
 
 def comparison_chart(key, order, values, stats, labels):
@@ -526,8 +582,18 @@ def comparison_chart(key, order, values, stats, labels):
 
 def predictor_page(key):
     cfg = CONFIG[key]
+    with st.spinner("Loading model and dataset..."):
+        ev0 = evaluate(key)
+        stats0 = reference_stats(key)
+        representative_records(key)
+    chips = ["<b>SVM</b> with RBF kernel"]
+    if ev0:
+        chips.append(f"Test accuracy <b>{ev0['acc'] * 100:.1f}%</b>")
+    if stats0:
+        chips.append(f"<b>{stats0['n']:,}</b> training records")
     page_header(f"{cfg['title']} risk prediction",
-                f"Enter patient measurements to see the model's estimate. Results update as you change a value. Dataset: {cfg['dataset']}.")
+                f"Enter patient measurements to see the model's estimate. Results update as you change a value. Dataset: {cfg['dataset']}.",
+                chips)
     b = bundle(key)
     if b is None:
         missing_notice(key)
@@ -549,13 +615,14 @@ def predictor_page(key):
 
     left, right = st.columns([1.1, 1], gap="large")
     with left:
-        html('<div class="muted" style="margin-bottom:0.4rem">Start from a real record from the dataset, then adjust any value.</div>')
-        c1, c2 = st.columns(2)
-        c1.button(f"{cfg['neg']} sample", key=f"{key}-neg", width="stretch",
-                  on_click=apply_preset, args=(key, base))
-        c2.button(f"{cfg['pos']} sample", key=f"{key}-pos", width="stretch",
-                  on_click=apply_preset, args=(key, sample_values(specs, recs[1] if recs else None)))
-        st.write("")
+        with st.container(key=f"card_presets_{key}"):
+            html('<div class="group-title">Patient record</div>'
+                 '<div class="muted" style="margin-bottom:0.6rem">Start from a real record from the dataset (the model classifies each correctly), then adjust any value.</div>')
+            c1, c2 = st.columns(2)
+            c1.button("Low-risk sample", key=f"{key}-neg", width="stretch",
+                      on_click=apply_preset, args=(key, base))
+            c2.button("High-risk sample", key=f"{key}-pos", width="stretch",
+                      on_click=apply_preset, args=(key, sample_values(specs, recs[1] if recs else None)))
 
         groups = {}
         for s in specs:
@@ -570,20 +637,35 @@ def predictor_page(key):
                         with cols[j % 2]:
                             values[s["name"]] = render_input(key, s)
         else:
-            for g, items in groups.items():
-                html(f'<div class="group-title">{g}</div>')
-                cols = st.columns(2)
-                for j, s in enumerate(items):
-                    with cols[j % 2]:
-                        values[s["name"]] = render_input(key, s)
+            for gi, (g, items) in enumerate(groups.items()):
+                with st.container(key=f"card_group_{key}_{gi}"):
+                    html(f'<div class="group-title">{g}</div>')
+                    cols = st.columns(2)
+                    for j, s in enumerate(items):
+                        with cols[j % 2]:
+                            values[s["name"]] = render_input(key, s)
 
     with right:
-        result_panel(key, b, order, values, ev)
+        labels = {sp["name"]: sp["label"] for sp in specs}
+        pct, head = result_panel(key, b, order, values, ev)
         st.write("")
-        html('<div class="panel-title">How this patient compares</div>'
-             '<div class="panel-sub">The six measurements that best separate the two groups in the training data. '
-             'Dots show the typical value for each group, scaled to the dataset range.</div>')
-        comparison_chart(key, order, values, stats, {sp['name']: sp['label'] for sp in specs})
+        with st.container(key=f"card_factors_{key}"):
+            html('<div class="panel-title">What stands out</div>'
+                 '<div class="panel-sub">Entered values that sit closer to the typical record of one group than the other.</div>')
+            up, down = key_factors(order, values, stats, labels) if stats else ([], [])
+            up_html = "".join(f'<span class="fx fx-up">{x}</span>' for x in up) or '<div class="fx-none">None stand out</div>'
+            down_html = "".join(f'<span class="fx fx-down">{x}</span>' for x in down) or '<div class="fx-none">None stand out</div>'
+            html(f'<div class="fx-label">Closer to the group {cfg["pos"][0].lower() + cfg["pos"][1:]}</div>{up_html}'
+                 f'<div class="fx-label" style="margin-top:0.8rem">Closer to the group {cfg["neg"][0].lower() + cfg["neg"][1:]}</div>{down_html}')
+        st.write("")
+        with st.container(key=f"card_compare_{key}"):
+            html('<div class="panel-title">How this patient compares</div>'
+                 '<div class="panel-sub">The six measurements that best separate the two groups in the training data. '
+                 'Dots show the typical value for each group, scaled to the dataset range.</div>')
+            comparison_chart(key, order, values, stats, labels)
+        st.write("")
+        st.download_button("Download result as CSV", data=result_csv(key, order, values, pct, head, labels),
+                           file_name=f"{key}_screening_result.csv", mime="text/csv", width="stretch")
         if key == "heart":
             html(HEART_NOTE)
         html('<div class="notice">Educational tool built for an AI/ML internship project. It is not a medical device '
@@ -594,9 +676,15 @@ def predictor_page(key):
 # Overview
 # ---------------------------------------------------------------------------
 def overview_page():
+    with st.spinner("Loading models and datasets..."):
+        for k in CONFIG:  # first visit only; results are cached afterwards
+            evaluate(k)
+            reference_stats(k)
+    total = sum((reference_stats(k) or {"n": 0})["n"] for k in CONFIG)
     page_header("Multi-disease risk screening",
                 "Three Support Vector Machine models estimate the likelihood of diabetes, heart disease and Parkinson's disease "
-                "from clinical and voice measurements.")
+                "from clinical and voice measurements.",
+                ["<b>3</b> trained models", f"<b>{total:,}</b> patient records", "Educational use only"])
     cards, evs = [], {}
     for key, cfg in CONFIG.items():
         ev, st_ = evaluate(key), reference_stats(key)
@@ -614,41 +702,49 @@ def overview_page():
         </div>""")
     html(f'<div class="kpis">{"".join(cards)}</div>')
     st.write("")
+    links = st.columns(3, gap="medium")
+    for col, (key, cfg), idx in zip(links, CONFIG.items(), (1, 2, 3)):
+        with col:
+            st.page_link(pages[idx], label=f"Open {cfg['title']} prediction", icon=cfg["icon"], width="stretch")
+    st.write("")
 
     c1, c2 = st.columns([1.35, 1], gap="large")
     with c1:
-        html('<div class="panel-title">Test performance by model</div>'
-             '<div class="panel-sub">Accuracy alone can hide mistakes. Recall is the share of real cases the model catches, '
-             'precision is the share of flagged cases that are real.</div>')
-        metrics = [("Accuracy", "acc"), ("Precision", "precision"), ("Recall", "recall"), ("F1 score", "f1")]
-        fig = go.Figure()
-        for key, cfg in CONFIG.items():
-            ev = evs[key]
-            if ev and ev.get("detail"):
-                fig.add_trace(go.Bar(name=cfg["title"], x=[m[0] for m in metrics], y=[ev[m[1]] * 100 for m in metrics],
-                                     marker_color=cfg["color"], hovertemplate="%{x}: %{y:.1f}%<extra>" + cfg["title"] + "</extra>"))
-        plot_style(fig, 330)
-        fig.update_layout(barmode="group", bargap=0.28, bargroupgap=0.06)
-        fig.update_yaxes(range=[0, 100], ticksuffix="%")
-        fig.update_xaxes(gridcolor="rgba(0,0,0,0)")
-        show(fig)
+        with st.container(key="card_overview_perf"):
+            html('<div class="panel-title">Test performance by model</div>'
+                 '<div class="panel-sub">Accuracy alone can hide mistakes. Recall is the share of real cases the model catches, '
+                 'precision is the share of flagged cases that are real.</div>')
+            metrics = [("Accuracy", "acc"), ("Precision", "precision"), ("Recall", "recall"), ("F1 score", "f1")]
+            fig = go.Figure()
+            for key, cfg in CONFIG.items():
+                ev = evs[key]
+                if ev and ev.get("detail"):
+                    fig.add_trace(go.Bar(name=cfg["title"], x=[m[0] for m in metrics], y=[ev[m[1]] * 100 for m in metrics],
+                                         marker_color=cfg["color"], hovertemplate="%{x}: %{y:.1f}%<extra>" + cfg["title"] + "</extra>"))
+            plot_style(fig, 330)
+            fig.update_layout(barmode="group", bargap=0.28, bargroupgap=0.06)
+            fig.update_yaxes(range=[0, 100], ticksuffix="%")
+            fig.update_xaxes(gridcolor="rgba(0,0,0,0)")
+            show(fig)
     with c2:
-        html('<div class="panel-title">Class balance in each dataset</div>'
-             '<div class="panel-sub">Parkinson\'s records are mostly positive, which is why the models use balanced class weights.</div>')
-        fig = go.Figure()
-        names, neg, pos = [], [], []
-        for key, cfg in CONFIG.items():
-            s = reference_stats(key)
-            if s:
-                names.append(cfg["title"]); neg.append(s["n0"]); pos.append(s["n1"])
-        fig.add_trace(go.Bar(y=names, x=neg, name="Without condition", orientation="h", marker_color=CLEAR))
-        fig.add_trace(go.Bar(y=names, x=pos, name="With condition", orientation="h", marker_color=RISK))
-        plot_style(fig, 330)
-        fig.update_layout(barmode="stack", bargap=0.45)
-        fig.update_yaxes(autorange="reversed", gridcolor="rgba(0,0,0,0)")
-        show(fig)
+        with st.container(key="card_overview_balance"):
+            html('<div class="panel-title">Class balance in each dataset</div>'
+                 '<div class="panel-sub">Parkinson\'s records are mostly positive, which is why the models use balanced class weights.</div>')
+            fig = go.Figure()
+            names, neg, pos = [], [], []
+            for key, cfg in CONFIG.items():
+                s_ = reference_stats(key)
+                if s_:
+                    names.append(cfg["title"]); neg.append(s_["n0"]); pos.append(s_["n1"])
+            fig.add_trace(go.Bar(y=names, x=neg, name="Without condition", orientation="h", marker_color=CLEAR))
+            fig.add_trace(go.Bar(y=names, x=pos, name="With condition", orientation="h", marker_color=RISK))
+            plot_style(fig, 330)
+            fig.update_layout(barmode="stack", bargap=0.45)
+            fig.update_yaxes(autorange="reversed", gridcolor="rgba(0,0,0,0)")
+            show(fig)
 
-    html('<div class="panel-title" style="margin-top:0.6rem">How each model is built</div>'
+    st.write("")
+    html('<div class="panel-title">How each model is built</div>'
          '<div class="panel-sub">The same five steps are applied to every dataset.</div>')
     html("""
     <div class="steps">
@@ -820,3 +916,9 @@ with st.sidebar:
          'Built by Lahari Reddi<br>B.Tech CSE, Andhra University</div>')
 
 nav.run()
+
+html("""
+<div class="footer"><b>Multi-Disease Prediction System</b><br>
+Built by Reddi Lahari, B.Tech CSE, Andhra University College of Engineering for Women, during the Robokwik Prabandhan AI/ML/DS internship (IIT Kanpur).<br>
+For education only. Not a medical device and not a substitute for professional medical advice.</div>
+""")
