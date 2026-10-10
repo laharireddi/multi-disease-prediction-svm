@@ -10,6 +10,8 @@ Expects, relative to this file:
 import os
 import pickle
 import warnings
+from datetime import datetime
+from html import escape as esc
 
 import numpy as np
 import pandas as pd
@@ -142,7 +144,7 @@ html, body, [class*="st-"], [data-testid="stAppViewContainer"], button, input, s
 .notice {{ border-left: 3px solid var(--amber); background: var(--amber-soft); padding: 0.7rem 1rem; border-radius: 0 6px 6px 0; font-size: 0.86rem; line-height: 1.5; color: var(--ink); }}
 
 /* ---- metric rows ---- */
-.mrow {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border: 1px solid var(--line); border-radius: 8px; background: #FFFFFF; }}
+.mrow {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 8px; background: #FFFFFF; }}
 .m {{ padding: 0.95rem 1.2rem; border-right: 1px solid var(--line); }}
 .m:last-child {{ border-right: none; }}
 .m .l {{ font-size: 0.82rem; color: var(--ink-2); }}
@@ -356,7 +358,10 @@ def evaluate(key):
     if stored is not None and abs(acc - stored) > 1e-6:
         return dict(acc=float(stored), detail=False, n_test=int(len(y_te)))
     p, r, f, _ = precision_recall_fscore_support(y_te, pred, average="binary", zero_division=0)
-    return dict(acc=acc, precision=float(p), recall=float(r), f1=float(f), cm=confusion_matrix(y_te, pred).tolist(),
+    cm_ = confusion_matrix(y_te, pred)
+    tn_, fp_ = int(cm_[0][0]), int(cm_[0][1])
+    return dict(acc=acc, precision=float(p), recall=float(r), f1=float(f), cm=cm_.tolist(),
+                specificity=(tn_ / (tn_ + fp_)) if (tn_ + fp_) else 0.0,
                 n_test=int(len(y_te)), detail=True)
 
 
@@ -580,6 +585,102 @@ def comparison_chart(key, order, values, stats, labels):
     show(fig)
 
 
+NOTICE_TEXT = ("<b>Clinical decision-support prototype.</b> Not validated on local patient data and not approved as a medical device. "
+               "Estimates must be reviewed by a qualified clinician and never used alone for diagnosis or treatment.")
+
+
+def out_of_range(specs, values, stats):
+    """Numeric inputs outside the range of the training data, where the model has seen nothing similar."""
+    flagged = []
+    if not stats:
+        return flagged
+    for sp in specs:
+        n = sp["name"]
+        if sp["kind"] == "select" or n not in stats["lo"].index:
+            continue
+        if values[n] < float(stats["lo"][n]) or values[n] > float(stats["hi"][n]):
+            flagged.append(sp["label"])
+    return flagged
+
+
+def add_to_log(key, head, pct):
+    ss = st.session_state
+    ss.setdefault("log", []).append({
+        "Time": datetime.now().strftime("%Y-%m-%d %H:%M"), "Patient ID": ss.get("enc_pid", ""), "Clinician": ss.get("enc_clin", ""),
+        "Condition": CONFIG[key]["title"], "Probability (%)": round(pct, 1), "Result": head,
+    })
+    st.toast("Added to the session log")
+
+
+def report_html(key, specs, values, pct, head, ev, flagged):
+    cfg, ss = CONFIG[key], st.session_state
+    rows = ""
+    for sp in specs:
+        v = values[sp["name"]]
+        shown = sp["options"][v] if sp["kind"] == "select" else (f"{v:g}" if isinstance(v, float) else v)
+        unit = f" {esc(sp['unit'])}" if sp.get("unit") else ""
+        rows += f"<tr><td>{esc(sp['label'])}</td><td>{esc(str(shown))}{unit}</td></tr>"
+    perf = ""
+    if ev and ev.get("detail"):
+        perf = (f"Held-out test accuracy {ev['acc']*100:.1f}%, sensitivity {ev['recall']*100:.1f}%, specificity {ev['specificity']*100:.1f}%, "
+                f"precision {ev['precision']*100:.1f}% on {ev['n_test']} test records.")
+    warn = (f"<p class='warn'>Values outside the range of the training data: {esc(', '.join(flagged))}. The estimate may be unreliable.</p>"
+            if flagged else "")
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{esc(cfg['title'])} screening report</title>
+<style>
+body{{font-family:'Segoe UI',Arial,sans-serif;color:#0E2230;margin:0;padding:32px 40px;max-width:780px}}
+h1{{font-size:22px;margin:0 0 4px}} h2{{font-size:14px;margin:22px 0 6px;border-bottom:1px solid #D9E1E4;padding-bottom:4px}}
+.sub{{color:#506676;font-size:13px}} table{{border-collapse:collapse;width:100%;font-size:13px}}
+td{{border-bottom:1px solid #E6ECED;padding:5px 6px}} td:first-child{{width:55%;color:#506676}}
+.result{{border:1px solid #D9E1E4;border-radius:8px;padding:14px 18px;margin-top:10px}}
+.big{{font-size:30px;font-weight:600}} .warn{{background:#F8EDD7;border-left:3px solid #B7791F;padding:8px 12px;font-size:13px}}
+.small{{font-size:12px;color:#506676;line-height:1.5}} .sign{{display:flex;gap:40px;margin-top:36px;font-size:13px}}
+.sign div{{flex:1;border-top:1px solid #0E2230;padding-top:4px}}
+@media print{{body{{padding:0}}}}
+</style></head><body>
+<h1>{esc(cfg['title'])} screening estimate</h1>
+<div class="sub">Generated {datetime.now().strftime('%d %b %Y, %H:%M')} by the Multi-Disease Prediction System</div>
+<h2>Patient and encounter</h2>
+<table><tr><td>Patient ID or MRN</td><td>{esc(ss.get('enc_pid','') or '-')}</td></tr>
+<tr><td>Patient name</td><td>{esc(ss.get('enc_name','') or '-')}</td></tr>
+<tr><td>Clinician</td><td>{esc(ss.get('enc_clin','') or '-')}</td></tr></table>
+<h2>Model estimate</h2>
+<div class="result"><div class="big">{pct:.0f}%</div><div>{esc(head)}</div></div>{warn}
+<h2>Measurements entered</h2><table>{rows}</table>
+<h2>Model and limitations</h2>
+<p class="small">Support Vector Machine (RBF kernel) trained on the {esc(cfg['dataset'])}. {esc(perf)}
+This is a decision-support prototype. It has not been validated on local patient data and is not approved as a medical device.
+The estimate describes similarity to historical records and does not confirm or exclude a diagnosis.</p>
+<div class="sign"><div>Reviewed by (name and signature)</div><div>Date</div></div>
+</body></html>""".encode("utf-8")
+
+
+def enc_field(label, store_key):
+    """Text input whose value survives page changes (Streamlit drops a widget's state when its page is not shown)."""
+    ss = st.session_state
+    ss.setdefault(store_key, "")
+
+    def _sync():
+        ss[store_key] = ss[f"w_{store_key}"]
+
+    return st.text_input(label, value=ss[store_key], key=f"w_{store_key}", on_change=_sync)
+
+
+def log_page():
+    page_header("Session log", "Estimates added during this session. They are kept in memory only and are not written to disk by this app.")
+    rows = st.session_state.get("log", [])
+    if not rows:
+        html('<div class="notice">Nothing logged yet. On a prediction page, press <b>Add to log</b> to record an estimate here.</div>')
+        return
+    df = pd.DataFrame(rows)
+    st.dataframe(df, width="stretch", hide_index=True)
+    c1, c2, _ = st.columns([1, 1, 2])
+    c1.download_button("Download log as CSV", df.to_csv(index=False).encode("utf-8"), "session_log.csv", "text/csv", width="stretch")
+    if c2.button("Clear log", width="stretch"):
+        st.session_state["log"] = []
+        st.rerun()
+
+
 def predictor_page(key):
     cfg = CONFIG[key]
     with st.spinner("Loading model and dataset..."):
@@ -615,6 +716,15 @@ def predictor_page(key):
 
     left, right = st.columns([1.1, 1], gap="large")
     with left:
+        with st.container(key=f"card_encounter_{key}"):
+            html('<div class="group-title">Patient and encounter</div>'
+                 '<div class="muted" style="margin-bottom:0.6rem">Kept in memory for this session only. The app does not write these details to disk.</div>')
+            e1, e2 = st.columns(2)
+            with e1:
+                enc_field("Patient ID or MRN", "enc_pid")
+            with e2:
+                enc_field("Patient name (optional)", "enc_name")
+            enc_field("Clinician", "enc_clin")
         with st.container(key=f"card_presets_{key}"):
             html('<div class="group-title">Patient record</div>'
                  '<div class="muted" style="margin-bottom:0.6rem">Start from a real record from the dataset (the model classifies each correctly), then adjust any value.</div>')
@@ -648,6 +758,10 @@ def predictor_page(key):
     with right:
         labels = {sp["name"]: sp["label"] for sp in specs}
         pct, head = result_panel(key, b, order, values, ev)
+        flagged = out_of_range(specs, values, stats)
+        if flagged:
+            html(f'<div class="notice" style="margin-top:0.9rem"><b>Check these values.</b> {esc(", ".join(flagged))} '
+                 f'{"is" if len(flagged) == 1 else "are"} outside the range of the training data, so the estimate may be unreliable.</div>')
         st.write("")
         with st.container(key=f"card_factors_{key}"):
             html('<div class="panel-title">What stands out</div>'
@@ -664,12 +778,16 @@ def predictor_page(key):
                  'Dots show the typical value for each group, scaled to the dataset range.</div>')
             comparison_chart(key, order, values, stats, labels)
         st.write("")
-        st.download_button("Download result as CSV", data=result_csv(key, order, values, pct, head, labels),
+        a1, a2, a3 = st.columns(3)
+        a1.button("Add to log", key=f"{key}-log", width="stretch", on_click=add_to_log, args=(key, head, pct))
+        a2.download_button("Report (HTML)", data=report_html(key, specs, values, pct, head, ev, flagged),
+                           file_name=f"{key}_screening_report.html", mime="text/html", width="stretch")
+        a3.download_button("CSV", data=result_csv(key, order, values, pct, head, labels),
                            file_name=f"{key}_screening_result.csv", mime="text/csv", width="stretch")
+        st.caption("Open the HTML report in a browser and press Ctrl+P to print it or save it as a PDF.")
         if key == "heart":
             html(HEART_NOTE)
-        html('<div class="notice">Educational tool built for an AI/ML internship project. It is not a medical device '
-             'and must not be used for diagnosis. Speak to a qualified clinician about any health concern.</div>')
+        html(f'<div class="notice">{NOTICE_TEXT}</div>')
 
 
 # ---------------------------------------------------------------------------
@@ -684,7 +802,7 @@ def overview_page():
     page_header("Multi-disease risk screening",
                 "Three Support Vector Machine models estimate the likelihood of diabetes, heart disease and Parkinson's disease "
                 "from clinical and voice measurements.",
-                ["<b>3</b> trained models", f"<b>{total:,}</b> patient records", "Educational use only"])
+                ["<b>3</b> trained models", f"<b>{total:,}</b> patient records", "Prototype, not clinically validated"])
     cards, evs = [], {}
     for key, cfg in CONFIG.items():
         ev, st_ = evaluate(key), reference_stats(key)
@@ -789,7 +907,8 @@ def performance_page():
                 <div class="mrow">
                   <div class="m"><div class="l">Accuracy</div><div class="x">{ev['acc']*100:.1f}%</div></div>
                   <div class="m"><div class="l">Precision</div><div class="x">{ev['precision']*100:.1f}%</div></div>
-                  <div class="m"><div class="l">Recall</div><div class="x">{ev['recall']*100:.1f}%</div></div>
+                  <div class="m"><div class="l">Recall (sensitivity)</div><div class="x">{ev['recall']*100:.1f}%</div></div>
+                  <div class="m"><div class="l">Specificity</div><div class="x">{ev['specificity']*100:.1f}%</div></div>
                   <div class="m"><div class="l">F1 score</div><div class="x">{ev['f1']*100:.1f}%</div></div>
                 </div>""")
             else:
@@ -888,8 +1007,7 @@ def about_page():
           Andhra University College of Engineering for Women.</div>
         </div>""")
     st.write("")
-    html('<div class="notice"><b>Disclaimer.</b> This tool is for education and academic demonstration. It is not a substitute for '
-         'professional medical diagnosis or advice.</div>')
+    html(f'<div class="notice">{NOTICE_TEXT}</div>')
 
 
 # ---------------------------------------------------------------------------
@@ -905,6 +1023,7 @@ pages = [
     st.Page(diabetes_page, title="Diabetes", icon=":material/bloodtype:", url_path="diabetes"),
     st.Page(heart_page, title="Heart disease", icon=":material/favorite:", url_path="heart"),
     st.Page(parkinsons_page, title="Parkinson's disease", icon=":material/graphic_eq:", url_path="parkinsons"),
+    st.Page(log_page, title="Session log", icon=":material/history:", url_path="log"),
     st.Page(performance_page, title="Model performance", icon=":material/monitoring:", url_path="performance"),
     st.Page(data_page, title="Data explorer", icon=":material/database:", url_path="data"),
     st.Page(about_page, title="About", icon=":material/info:", url_path="about"),
@@ -912,7 +1031,7 @@ pages = [
 nav = st.navigation(pages)
 
 with st.sidebar:
-    html('<div class="side-foot" style="margin-top:1.5rem"><b>Educational use only.</b><br>Not a medical device.<br><br>'
+    html('<div class="side-foot" style="margin-top:1.5rem"><b>Decision-support prototype.</b><br>Not clinically validated.<br><br>'
          'Built by Lahari Reddi<br>B.Tech CSE, Andhra University</div>')
 
 nav.run()
@@ -920,5 +1039,5 @@ nav.run()
 html("""
 <div class="footer"><b>Multi-Disease Prediction System</b><br>
 Built by Reddi Lahari, B.Tech CSE, Andhra University College of Engineering for Women, during the Robokwik Prabandhan AI/ML/DS internship (IIT Kanpur).<br>
-For education only. Not a medical device and not a substitute for professional medical advice.</div>
+Decision-support prototype. Not validated for clinical use, not a medical device, and not a substitute for professional medical judgement.</div>
 """)
